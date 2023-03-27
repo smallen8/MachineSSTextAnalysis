@@ -15,23 +15,40 @@ library(widyr)
 # Get age, stage of life, number of kids, number of people in residents, block
 
 # Load data.
-loadData <- function() {
-  raw_text <- read.csv('text.csv')
-  raw_text$neighbor_not_anonymous <- NULL
-  neighbor_metadata <- read.csv('neighbor_metadata.csv')
-  neighbor_metadata$neighbor_not_anonymous <- NULL
+loadData <- function(filename, textColumn) {
+  raw_text <- readxl::read_excel(filename)
+  colnames(raw_text) <- c('timestamp','age_group','gender','family_status',
+                          'number_of_children','live_in_ss','work_in_ss',
+                          'love_question','change_question','responsibility_question','vision_question')
+  # raw_text <- readxl::read_excel('surveyResponses.xlsx')
   
+  raw_text <- raw_text %>%
+    mutate(number_of_children = case_when(
+      tolower(number_of_children) %in% c('zero','none') ~ 0,
+      tolower(number_of_children)=='one' ~ 1,
+      tolower(number_of_children)=='two' ~ 2,
+      tolower(number_of_children)=='three' ~ 3,
+      tolower(number_of_children)=='four' ~ 4,
+      TRUE ~ as.numeric(number_of_children) # grown children comments will become NA
+    )) %>%
+    mutate(has_kids = ifelse(number_of_children>0, 'Yes', 'No'))
+
   text_df <- raw_text %>%
-    left_join(neighbor_metadata, by='neighbor') %>%
+    mutate(text = !!sym(textColumn)) %>%
+    mutate(text = gsub('\n', ' ', text)) %>%
     filter(!is.na(text), trimws(text)!='') %>%
     mutate(text = gsub('[^A-Za-z0-9. ]', '', text),
            line_num = row_number()) %>%
-    as_tibble()
+    as_tibble() %>%
+    select(timestamp, age_group, gender, family_status,
+           number_of_children, has_kids, live_in_ss, work_in_ss, text)
   
   return(text_df)
 }
-text_df <- loadData()
-# View(text_df)
+love_question_df <- loadData(filename = 'surveyResponses.xlsx', textColumn = 'love_question')
+change_question_df <- loadData(filename = 'surveyResponses.xlsx', textColumn = 'change_question')
+responsibility_question_df <- loadData(filename = 'surveyResponses.xlsx', textColumn = 'responsibility_question')
+vision_question_df <- loadData(filename = 'surveyResponses.xlsx', textColumn = 'vision_question')
 
 # Count words. Group by neighbor, age group, stage of life, etc.
 countWords <- function(text_df, groupByVar = "Don't Summarize") {
@@ -115,6 +132,8 @@ plotTopWords <- function(text_df, groupByVar = "Don't Summarize", tokenType = 'w
     tokenCount <- countTrigrams(text_df, groupByVar = groupByVar) %>%
       rename(token = trigram)
   }
+  tokenCount <- tokenCount %>%
+    filter(n>1)
   
   title <- case_when(tokenType=='word' ~ glue::glue('Top {myN} Words'),
                      tokenType=='bigram' ~ glue::glue('Top {myN} 2-Word Phrases'),
@@ -153,17 +172,17 @@ plotTopWords <- function(text_df, groupByVar = "Don't Summarize", tokenType = 'w
       ylab('Count') +
       theme(text = element_text(size = textSize)) +
       scale_fill_brewer(palette = colorPalette)
-  } else if(groupByVar=='stage_of_life') {
+  } else if(groupByVar=='family_status') {
     tokenCount %>%
       group_by(!!sym(groupByVar)) %>%
       arrange(desc(n)) %>%
       filter(row_number()<=myN) %>%
       ungroup() %>%
-      mutate(stage_of_life = as.factor(stage_of_life),
-             token = reorder_within(token, n, stage_of_life)) %>%
+      mutate(family_status = as.factor(family_status),
+             token = reorder_within(token, n, family_status)) %>%
       ggplot() +
       geom_col(aes(token, n, fill = !!sym(groupByVar)), show.legend = F) +
-      facet_wrap(~stage_of_life, scales='free_y') +
+      facet_wrap(~family_status, scales='free_y') +
       coord_flip() +
       scale_x_reordered() +
       ggtitle(title) +
@@ -173,6 +192,7 @@ plotTopWords <- function(text_df, groupByVar = "Don't Summarize", tokenType = 'w
       scale_fill_brewer(palette = colorPalette)
   } else if(groupByVar=='has_kids') {
     tokenCount %>%
+      filter(!is.na(has_kids)) %>%
       group_by(!!sym(groupByVar)) %>%
       arrange(desc(n)) %>%
       filter(row_number()<=myN) %>%
@@ -189,7 +209,61 @@ plotTopWords <- function(text_df, groupByVar = "Don't Summarize", tokenType = 'w
       ylab('Count') +
       theme(text = element_text(size = textSize)) +
       scale_fill_brewer(palette = colorPalette)
-  }  
+  } else if(groupByVar=='live_in_ss') {
+    tokenCount %>%
+      group_by(!!sym(groupByVar)) %>%
+      arrange(desc(n)) %>%
+      filter(row_number()<=myN) %>%
+      ungroup() %>%
+      mutate(live_in_ss = as.factor(live_in_ss),
+             token = reorder_within(token, n, live_in_ss)) %>%
+      ggplot() +
+      geom_col(aes(token, n, fill = !!sym(groupByVar)), show.legend = F) +
+      facet_wrap(~live_in_ss, scales='free_y') +
+      coord_flip() +
+      scale_x_reordered() +
+      ggtitle(title) +
+      xlab(xlabel) +
+      ylab('Count') +
+      theme(text = element_text(size = textSize)) +
+      scale_fill_brewer(palette = colorPalette)
+  } else if(groupByVar=='work_in_ss') {
+    tokenCount %>%
+      group_by(!!sym(groupByVar)) %>%
+      arrange(desc(n)) %>%
+      filter(row_number()<=myN) %>%
+      ungroup() %>%
+      mutate(work_in_ss = as.factor(work_in_ss),
+             token = reorder_within(token, n, work_in_ss)) %>%
+      ggplot() +
+      geom_col(aes(token, n, fill = !!sym(groupByVar)), show.legend = F) +
+      facet_wrap(~work_in_ss, scales='free_y') +
+      coord_flip() +
+      scale_x_reordered() +
+      ggtitle(title) +
+      xlab(xlabel) +
+      ylab('Count') +
+      theme(text = element_text(size = textSize)) +
+      scale_fill_brewer(palette = colorPalette)
+  } else if(groupByVar=='gender') {
+    tokenCount %>%
+      group_by(!!sym(groupByVar)) %>%
+      arrange(desc(n)) %>%
+      filter(row_number()<=myN) %>%
+      ungroup() %>%
+      mutate(gender = as.factor(gender),
+             token = reorder_within(token, n, gender)) %>%
+      ggplot() +
+      geom_col(aes(token, n, fill = !!sym(groupByVar)), show.legend = F) +
+      facet_wrap(~gender, scales='free_y') +
+      coord_flip() +
+      scale_x_reordered() +
+      ggtitle(title) +
+      xlab(xlabel) +
+      ylab('Count') +
+      theme(text = element_text(size = textSize)) +
+      scale_fill_brewer(palette = colorPalette)
+  } 
 }
 
 getTfIdf <- function(text_df, groupByVar = 'neighbor', myN = 5) {
@@ -209,20 +283,48 @@ getTfIdf <- function(text_df, groupByVar = 'neighbor', myN = 5) {
     select(-total) %>%
     group_by(!!sym(groupByVar)) %>%
     arrange(desc(tf_idf)) %>%
-    head(myN) %>%
+    filter(row_number()<=myN) %>%
     ungroup() %>%
     arrange(!!sym(groupByVar), desc(tf_idf))
   
   return(group_tf_idf)
 }
-# plotTfIdf <- function(text_df, groupByVar = 'neighbor', myN = 5) {
-#   tf_idf_summ <- getTfIdf(text_df, groupByVar = 'age_group', myN = 5)
-#   tf_idf_summ %>%
-#     ggplot(aes(tf_idf, reorder(word, tf_idf), fill = !!sym(groupByVar))) +
-#     geom_col(show.legend = FALSE) +
-#     facet_wrap(~(!!sym(groupByVar)), ncol = 2, scales = "free") +
-#     labs(x = "tf-idf", y = NULL)
-# }
+plotTfIdf <- function(text_df, groupByVar = 'neighbor', myN = 5) {
+  tf_idf_summ <- getTfIdf(text_df, groupByVar = 'age_group', myN = 5)
+  p <- tf_idf_summ %>%
+    filter(n>=myN) %>%
+    mutate(word = as.factor(word)) %>%
+    ggplot() +
+    # ggplot(aes(tf_idf, reorder(word, tf_idf), fill = !!sym(groupByVar))) +
+    geom_col(aes(reorder(word, tf_idf), tf_idf), show.legend = FALSE) +
+    labs(x = "tf-idf", y = NULL) + 
+    coord_flip()
+  if(groupByVar=='age_group') {
+    p <- p +
+      facet_wrap(~age_group, ncol = 2, scales = "free_y")
+  }
+  if(groupByVar=='gender') {
+    p <- p +
+      facet_wrap(~gender, ncol = 2, scales = "free_y")
+  }
+  if(groupByVar=='family_status') {
+    p <- p +
+      facet_wrap(~family_status, ncol = 2, scales = "free_y")
+  }
+  if(groupByVar=='has_kids') {
+    p <- p +
+      facet_wrap(~has_kids, ncol = 2, scales = "free_y")
+  }
+  if(groupByVar=='live_in_ss') {
+    p <- p +
+      facet_wrap(~live_in_ss, ncol = 2, scales = "free_y")
+  }
+  if(groupByVar=='work_in_ss') {
+    p <- p +
+      facet_wrap(~work_in_ss, ncol = 2, scales = "free_y")
+  }
+  p
+}
 
 graphBigram <- function(text_df, myN = 2) {
   bigram_graph <- countBigrams(text_df) %>%
@@ -283,7 +385,7 @@ plotTopCorrelatedWords <- function(text_df, myN = 10, myCorr = .2,
     wordCorrs %>%
       ggplot(aes(item2, correlation)) +
       geom_bar(stat = "identity") +
-      facet_wrap(~ item1, scales = "free") +
+      facet_wrap(~ item1, scales = "free_y") +
       coord_flip() +
       xlab('word') +
       theme(text = element_text(size = textSize)) +
@@ -316,12 +418,12 @@ plotWordCorrGraph <- function(text_df, myN = 10, myCorr = .2) {
 #
 # countWords(text_df, groupByVar = 'neighbor')
 # countBigrams(text_df, groupByVar = 'age_group')
-# countTrigrams(text_df, groupByVar = 'stage_of_life')
+# countTrigrams(text_df, groupByVar = 'family_status')
 #
 # # Plot counts of words, bigrams, trigrams
 # plotTopWords(text_df, tokenType = 'word', myN = textSize)
 # plotTopWords(text_df, groupByVar = 'age_group', tokenType = 'word')
-# plotTopWords(text_df, groupByVar = 'stage_of_life', tokenType = 'bigram')
+# plotTopWords(text_df, groupByVar = 'family_status', tokenType = 'bigram')
 
 # # Analyze tf-idf to see unique responses from each neighbor.
 # getTfIdf(text_df, groupByVar = 'neighbor', myN = 5)
